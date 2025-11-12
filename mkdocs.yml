@@ -1,0 +1,62 @@
+site_name: Documentation Items CRUD API
+
+theme:
+  name: material
+  language: fr
+  features:
+    - navigation.instant  # Navigation instantanée (SPA)
+    - navigation.tracking  # URL tracking
+    - navigation.tabs  # Onglets de navigation
+    - navigation.sections  # Sections expandables
+    - navigation.expand  # Tout expander par défaut
+    - navigation.top  # Bouton retour en haut
+    - search.suggest  # Suggestions de recherche
+    - search.highlight  # Surlignage des résultats
+    - content.code.copy  # Bouton copier pour code
+    - content.code.annotate  # Annotations dans le code
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Mode sombre
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Mode clair
+
+plugins:
+  - search:
+      lang: fr
+  - gen-files:
+      scripts:
+        - scripts/gen_ref_pages.py
+        - scripts/genIA.py
+  - literate-nav
+  - section-index
+  - awesome-pages
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            members_order: source  # Ordre du code source
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            docstring_section_style: spacy  # Style plus lisible
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
+
+nav:
+  - Accueil: index.md
+  - Docs auto générer sans IA: reference/SUMMARY.md
+  - Docs avec IA: docsIA/SUMMARY.md
+  - Tutoriel MkDocs: tutoriel-mkdocs.md

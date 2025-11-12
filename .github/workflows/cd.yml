@@ -1,0 +1,149 @@
+# Nom du workflow qui apparaît dans l'interface GitHub Actions
+name: CD
+
+# Définit quand ce workflow doit s'exécuter
+on:
+  # Déclenchement manuel depuis l'interface GitHub Actions
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environnement cible (dev, staging, production)'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - develop
+      version:
+        description: 'Version à déployer (ex: v1.2.3) - laisser vide pour latest'
+        required: false
+        type: string
+
+  # Déclenchement automatique après le workflow Release
+  workflow_run:
+    workflows: ["Release"]    # Nom du workflow qui doit se terminer
+    types: [completed]        # Déclenche uniquement si le workflow se termine
+    branches:
+      - main                  # Déploie automatiquement depuis main (production)
+
+
+# Permissions pour ce workflow
+permissions:
+  contents: read      # Lecture du contenu du repository
+  id-token: write     # Nécessaire si vous utilisez OIDC
+
+# Définit les différentes tâches (jobs) à exécuter
+jobs:
+  # Job pour déployer l'application sur Azure
+  deploy:
+    name: Deploy to Azure Container Apps
+    runs-on: ubuntu-latest    # Utilise la dernière version d'Ubuntu
+    # Empêche plusieurs déploiements simultanés sur le même environnement
+    concurrency:
+      group: deploy-${{ github.event.inputs.environment || ((github.event.workflow_run.head_branch || github.ref_name) == 'main' && 'production' || 'staging') }}
+      
+    # Ne déploie que si le workflow Release a réussi ou si c'est un déclenchement manuel
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Détermine l'environnement en fonction du contexte
+    environment:
+      name: ${{ github.event.inputs.environment || ((github.event.workflow_run.head_branch || github.ref_name) == 'main' && 'production' || 'staging') }}
+      url: ${{ steps.deploy.outputs.url }}  # URL de l'application déployée
+    # Outputs permettent de partager des données avec d'autres jobs
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}  # Expose l'URL pour les jobs suivants (health-check)
+      version: ${{ steps.version.outputs.version }}  # Expose la version déployée
+
+    steps:
+      # Étape 1: Récupère le code source (nécessaire pour les configs)
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+
+      # Étape 2: Détermine la version à déployer
+      - name: Determine Version
+        id: version
+        run: |
+          # Si une version est spécifiée manuellement, on l'utilise
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Pour les déploiements automatiques, récupère le dernier tag créé par Release
+            git fetch --tags
+            VERSION=$(git describe --tags --abbrev=0)
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Deploying version: $VERSION"
+
+      # Étape 3: Authentification à Azure via Service Principal
+      - name: Azure Login
+        uses: azure/login@v1  # Action officielle Microsoft Azure
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}  # JSON du Service Principal
+
+          # ALTERNATIVE avec OIDC (plus sécurisé, décommentez si configuré):
+          # client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          # tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          # subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Étape 4: Déploie l'application sur Azure Container Apps
+      - name: Deploy to Azure Container Apps
+        id: deploy
+        uses: azure/container-apps-deploy-action@v1  # Action Azure pour Container Apps
+        with:
+          # Nom de la Container App Azure
+          containerAppName: ${{ secrets.AZURE_CONTAINER_APP_NAME }}
+          # Resource Group où se trouve la Container App
+          resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          # Image Docker à déployer depuis GitHub Container Registry
+          imageToDeploy: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+
+      # Étape 5: Affiche l'URL de déploiement
+      - name: Display Deployment URL
+        run: |
+          echo "✅ Deployment successful!"
+          echo "🌐 Application URL: ${{ steps.deploy.outputs.url }}"
+          echo "📦 Version deployed: ${{ steps.version.outputs.version }}"
+          echo "🎯 Environment: ${{ github.event.inputs.environment || ((github.event.workflow_run.head_branch || github.ref_name) == 'main' && 'production' || 'staging') }}"
+
+  # Job pour vérifier la santé de l'application après déploiement
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    needs: deploy              # Ce job attend que le déploiement soit terminé
+    steps:
+      # Étape 1: Attend que l'application soit prête
+      - name: Wait for Application
+        run: |
+          echo "⏳ Waiting 30 seconds for application to be ready..."
+          sleep 30
+
+      # Étape 2: Vérifie que l'application répond (endpoint de santé)
+      - name: Health Check
+        run: |
+          # TODO: Personnalisez cette étape selon votre application
+          # Exemple avec un endpoint /health
+          # URL="${{ needs.deploy.outputs.url }}"
+          # RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health")
+          # if [ "$RESPONSE" -eq 200 ]; then
+          #   echo "✅ Health check passed!"
+          # else
+          #   echo "❌ Health check failed with status: $RESPONSE"
+          #   exit 1
+          # fi
+
+          echo "⚠️ Health check not implemented yet"
+          echo "👉 Implement a health check endpoint in your application"
+
+  # Job optionnel: Rollback en cas de problème
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [deploy, health-check]
+    if: failure()              # S'exécute uniquement si un job précédent échoue
+    steps:
+      - name: Notify Rollback Needed
+        run: |
+          echo "❌ Deployment or health check failed!"
+          echo "🔄 Manual rollback may be needed"
+          echo "💡 Run this workflow manually with the previous working version"
+

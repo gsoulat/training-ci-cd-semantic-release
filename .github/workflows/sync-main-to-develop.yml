@@ -1,0 +1,95 @@
+# Synchronise develop avec main après chaque release
+# Résout les conflits automatiques sur CHANGELOG.md et pyproject.toml
+name: Sync Main to Develop
+
+on:
+  # Se déclenche après chaque workflow Release réussi
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+    branches:
+      - main
+
+# Permissions nécessaires
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Sync main to develop
+    runs-on: ubuntu-latest
+    # Uniquement si le workflow Release a réussi
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      # Génère un token avec plus de permissions (pour déclencher d'autres workflows)
+      - name: Generate App Token
+        id: get_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+        with:
+          token: ${{ steps.get_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "super-chery-bot[bot]"
+          git config user.email "super-chery-bot[bot]@users.noreply.github.com"
+
+      - name: Sync main into develop
+        run: |
+          # Récupère les dernières modifications
+          git fetch origin main
+          git fetch origin develop
+
+          # Checkout develop
+          git checkout develop
+          git pull origin develop
+
+          # Merge main dans develop
+          # L'option -X theirs privilégie main en cas de conflit sur CHANGELOG/pyproject
+          if git merge origin/main --no-edit -m "chore: sync main to develop after release
+
+          Auto-sync après release pour intégrer les changements de semantic-release (CHANGELOG.md, pyproject.toml)"; then
+            echo "✅ Merge réussi sans conflit"
+          else
+            echo "⚠️ Conflits détectés, résolution automatique..."
+
+            # En cas de conflit, privilégier la version de main pour ces fichiers
+            git checkout --theirs CHANGELOG.md pyproject.toml
+            git add CHANGELOG.md pyproject.toml
+
+            # Vérifier s'il y a d'autres conflits
+            if git diff --name-only --diff-filter=U | grep -v -E '(CHANGELOG.md|pyproject.toml)'; then
+              echo "❌ D'autres conflits existent, impossible de résoudre automatiquement"
+              exit 1
+            fi
+
+            git commit --no-edit
+            echo "✅ Conflits résolus automatiquement"
+          fi
+
+          # Pousser develop
+          git push origin develop
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ develop synchronisé avec main avec succès"
+          echo "📝 CHANGELOG.md et pyproject.toml mis à jour"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ La synchronisation automatique a échoué"
+          echo "💡 Synchronisation manuelle nécessaire :"
+          echo "   git checkout develop"
+          echo "   git pull origin main"
+          echo "   # Résoudre les conflits manuellement"
+          echo "   git push origin develop"

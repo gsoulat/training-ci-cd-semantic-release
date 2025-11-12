@@ -1,0 +1,96 @@
+# Nom du workflow qui apparaît dans l'interface GitHub Actions
+name: CI
+
+# Définit quand ce workflow doit s'exécuter
+on:
+    # S'exécute uniquement lors de l'ouverture/mise à jour d'une Pull Request vers ces branches
+    push:
+        branches:
+            - main
+            - develop
+    pull_request:
+        branches:
+            - main
+            - develop
+
+# Définit les différentes tâches (jobs) à exécuter
+jobs:
+    # Job pour vérifier la qualité et le formatage du code
+    lint:
+        name: lint & format Check  # Nom affiché dans l'UI GitHub
+        runs-on: ubuntu-latest      # Utilise la dernière version d'Ubuntu pour exécuter ce job
+        steps:
+            # Étape 1: Récupère le code source du repository
+            - name: Checkout
+              uses: actions/checkout@v5.0.0  # Action officielle GitHub pour cloner le repo
+
+            # Étape 2: Installe uv (gestionnaire de paquets Python ultra-rapide)
+            - name: astral-sh/setup-uv
+              uses: astral-sh/setup-uv@v7.1.2  # Action pour installer uv
+              with:
+                version: "latest"  # Utilise la dernière version stable de uv
+
+            # Étape 3: Installe toutes les dépendances Python du projet
+            - name: Install Dependencies
+              run: uv sync --all-extras  # --all-extras installe les dépendances optionnelles
+
+            # Étape 4: Exécute Ruff pour vérifier la qualité du code
+            - name: Run Ruff Lint
+              run: uv run ruff check . --fix  # Vérifie et corrige automatiquement les problèmes de code
+
+            # Étape 5: Formate le code selon les standards Ruff
+            - name: run ruff format
+              run: uv run ruff format .  # Applique le formatage automatique du code
+
+
+    # Job pour vérifier le typage statique du code Python
+    type-check:
+        name: type check          # Nom affiché dans l'UI GitHub
+        runs-on: ubuntu-latest    # Utilise la dernière version d'Ubuntu
+        steps:
+            # Étape 1: Récupère le code source
+            - name: Checkout
+              uses: actions/checkout@v5.0.0
+
+            # Étape 2: Installe uv
+            - name: astral-sh/setup-uv
+              uses: astral-sh/setup-uv@v7.1.2
+              with:
+                version: "latest"
+
+            # Étape 3: Installe les dépendances
+            - name: Install Dependencies
+              run: uv sync --all-extras
+
+            # Étape 4: Vérifie les annotations de type avec MyPy
+            - name: Run Type Check
+              run: uv run mypy app  # Analyse statique du typage dans le dossier 'app'
+
+    # Job pour exécuter les tests avec couverture de code
+    test:
+        name: Tests              # Nom affiché dans l'UI GitHub
+        runs-on: ubuntu-latest   # Utilise la dernière version d'Ubuntu
+        steps:
+            # Étape 1: Récupère le code source
+            - name: Checkout
+              uses: actions/checkout@v5.0.0
+
+            # Étape 2: Installe uv
+            - name: astral-sh/setup-uv
+              uses: astral-sh/setup-uv@v7.1.2
+              with:
+                version: "latest"
+
+            # Étape 3: Installe les dépendances
+            - name: Install Dependencies
+              run: uv sync --all-extras
+
+            # Étape 4: Exécute les tests avec analyse de couverture
+            - name: Run Tests
+              run: |
+                # --cov=app : Mesure la couverture du dossier 'app'
+                # --cov-report=xml : Génère un rapport XML (pour intégration continue)
+                # --cov-report=term : Affiche le rapport dans le terminal
+                # --cov-fail-under=60 : Échoue si la couverture est inférieure à 60%
+                uv run pytest --cov=app --cov-report=xml --cov-report=term --cov-fail-under=60
+

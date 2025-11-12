@@ -1,0 +1,71 @@
+name: Deploy Documentation
+
+# Se déclenche sur push vers main ou manuellement
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Permet de déclencher manuellement depuis l'interface GitHub
+
+# Permissions nécessaires pour déployer sur GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Empêche les déploiements concurrents
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # Job de construction de la documentation
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout du code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Récupère tout l'historique pour git-revision-date
+
+      - name: 🐍 Installation de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 📦 Installation de uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: 🔧 Installation des dépendances
+        run: uv sync --group dev
+
+      - name: 🤖 Génération de la documentation IA
+        run: uv run python scripts/genIA.py
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      - name: 🏗️ Construction de la documentation
+        run: uv run mkdocs build --verbose
+
+      - name: 📤 Upload des artefacts
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  # Job de déploiement sur GitHub Pages
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: 🚀 Déploiement sur GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
